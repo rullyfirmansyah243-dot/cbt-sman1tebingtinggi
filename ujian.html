@@ -346,10 +346,11 @@
                     .eq('id', dataSiswa.peserta_id)
                     .maybeSingle();
 
-                if (statusDb && ['terkunci', 'selesai'].includes(statusDb.status_pengerjaan)) {
+                const stAwal = String(statusDb?.status_pengerjaan || '').toLowerCase();
+                if (['terkunci', 'diblokir', 'selesai', 'terkirim', 'waktu_habis', 'dipaksa_selesai'].includes(stAwal)) {
                     alert(
-                        statusDb.status_pengerjaan === 'terkunci'
-                            ? 'AKSES DITOLAK: Akun Anda dalam status TERKUNCI. Hubungi Proktor/Pengawas untuk membuka blokir.'
+                        ['terkunci', 'diblokir'].includes(stAwal)
+                            ? 'AKSES DITOLAK: Akun Anda dalam status TERKUNCI / DIBLOKIR. Hubungi Proktor/Pengawas untuk membuka blokir.'
                             : 'Ujian Anda sudah berstatus SELESAI.'
                     );
                     localStorage.removeItem('siswaLogin');
@@ -779,8 +780,7 @@
             }]);
 
             if (jumlahPelanggaran >= batasMaksPelanggaran) {
-                alert("Batas pelanggaran maksimal tercapai. Ujian Anda dihentikan.");
-                kumpulUjianFinal('diblokir');
+                await kumpulUjianFinal('diblokir');
             } else {
                 setTimeout(() => {
                     warningBox.classList.add('opacity-0');
@@ -803,9 +803,20 @@
             await paksaSimpanEsaiAktif();
             ujianDitutup = true;
             antiCheatAktif = false;
+
+            const statusLogFinal = (alasan === 'diblokir') ? 'diblokir' : 'selesai';
+
             if (dataSiswa && dataSiswa.log_id) {
-                await db.from('log_ujian').update({ status: alasan === 'diblokir' ? 'diblokir' : 'selesai' }).eq('id', dataSiswa.log_id);
+                await db.from('log_ujian')
+                    .update({ status: statusLogFinal })
+                    .eq('id', dataSiswa.log_id);
+            } else if (dataSiswa && dataSiswa.id && dataSiswa.id_sesi) {
+                await db.from('log_ujian')
+                    .update({ status: statusLogFinal })
+                    .eq('id_siswa', dataSiswa.id)
+                    .eq('id_sesi', dataSiswa.id_sesi);
             }
+
             if (dataSiswa && dataSiswa.peserta_id) {
                 await db.from('peserta_ujian').update({
                     status_pengerjaan: alasan,
@@ -813,9 +824,25 @@
                     finished_reason: alasan,
                     last_activity_at: new Date().toISOString()
                 }).eq('id', dataSiswa.peserta_id);
+            } else if (dataSiswa && dataSiswa.id && dataSiswa.id_sesi) {
+                await db.from('peserta_ujian').update({
+                    status_pengerjaan: alasan,
+                    submitted_at: new Date().toISOString(),
+                    finished_reason: alasan,
+                    last_activity_at: new Date().toISOString()
+                }).eq('id_siswa', dataSiswa.id).eq('id_sesi', dataSiswa.id_sesi);
             }
+
             if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
-            alert(alasan === 'waktu_habis' ? "Waktu ujian habis. Jawaban telah dikumpulkan." : "Ujian berhasil diselesaikan!");
+
+            if (alasan === 'diblokir') {
+                alert("Batas pelanggaran maksimal tercapai. Ujian Anda dihentikan dan akun dikunci. Hubungi Proktor/Pengawas.");
+            } else if (alasan === 'waktu_habis') {
+                alert("Waktu ujian habis. Jawaban telah dikumpulkan.");
+            } else {
+                alert("Ujian berhasil diselesaikan!");
+            }
+
             if (dataSiswa && dataSiswa.id_paket) {
                 sessionStorage.removeItem(`cache_soal_${dataSiswa.id_paket}`);
             }
